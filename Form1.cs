@@ -13,7 +13,7 @@ public delegate IntPtr LowLevelMouseProc(int nCode, IntPtr wParam, IntPtr lParam
 public partial class Form1 : Form
 {
     public static Form1 Instance;
-    private const bool DebugBlockedZone = false;
+    private const bool DebugBlockedZone = true; // ← подсветка включена
     private static readonly Size CloseButtonSize = new Size(18, 18);
 
     Process? chromeProcess;
@@ -75,7 +75,7 @@ public partial class Form1 : Form
             chromeProcess = Process.Start(new ProcessStartInfo
             {
                 FileName = chromePath,
-                Arguments = $"--kiosk --restore-last-session --disable-infobars --force-device-scale-factor=1 --user-data-dir=\"{userDataDir}\" --profile-directory=\"{profileName}\" https://kaspi.kz/mc/#/orders-new?status=NEW",
+                Arguments = $"--kiosk --restore-last-session --disable-infobars --force-device-scale-factor=1 --user-data-dir=\"{userDataDir}\" --profile-directory=\"{profileName}\" https://kaspi.kz",
                 UseShellExecute = true
             });
         }
@@ -140,10 +140,20 @@ public partial class Form1 : Form
 
         if (DebugBlockedZone)
         {
+            // Полупрозрачная красная заливка — видно что зона заблокирована
             using SolidBrush debugBrush = new SolidBrush(Color.FromArgb(90, Color.Red));
             e.Graphics.FillRectangle(debugBrush, blockedZone);
+            // Красная рамка
             using Pen debugPen = new Pen(Color.Red, 2);
             e.Graphics.DrawRectangle(debugPen, blockedZone);
+            // Текст "ЗАПРЕЩЕНО"
+            TextRenderer.DrawText(
+                e.Graphics,
+                "ЗАПРЕЩЕНО",
+                new Font("Segoe UI", 10, FontStyle.Bold),
+                blockedZone,
+                Color.DarkRed,
+                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
         }
     }
 
@@ -167,8 +177,31 @@ public partial class Form1 : Form
         {
             int vkCode = Marshal.ReadInt32(lParam);
             Keys key = (Keys)vkCode;
-            bool isAltDown = (GetAsyncKeyState(0x12) & 0x8000) != 0;
-            if (key == Keys.LWin || key == Keys.RWin || (isAltDown && key == Keys.Tab) || (isAltDown && key == Keys.F4))
+            bool isAltDown   = (GetAsyncKeyState(0x12) & 0x8000) != 0; // Alt
+            bool isCtrlDown  = (GetAsyncKeyState(0x11) & 0x8000) != 0; // Ctrl
+            bool isShiftDown = (GetAsyncKeyState(0x10) & 0x8000) != 0; // Shift
+
+            // Win, Alt+Tab, Alt+F4
+            if (key == Keys.LWin || key == Keys.RWin ||
+                (isAltDown && key == Keys.Tab) ||
+                (isAltDown && key == Keys.F4))
+                return (IntPtr)1;
+
+            // Ctrl+Plus / Ctrl+= / Ctrl+Minus — масштаб браузера
+            if (isCtrlDown && (key == Keys.Add || key == Keys.Oemplus ||
+                               key == Keys.Subtract || key == Keys.OemMinus))
+                return (IntPtr)1;
+
+            // Ctrl+N — новое окно
+            if (isCtrlDown && !isShiftDown && key == Keys.N)
+                return (IntPtr)1;
+
+            // Ctrl+Shift+N — инкогнито
+            if (isCtrlDown && isShiftDown && key == Keys.N)
+                return (IntPtr)1;
+
+            // Ctrl+T — новая вкладка
+            if (isCtrlDown && key == Keys.T)
                 return (IntPtr)1;
         }
         return CallNextHookEx(_kbdHookID, nCode, wParam, lParam);
@@ -176,19 +209,31 @@ public partial class Form1 : Form
 
     private static IntPtr MouseCallback(int nCode, IntPtr wParam, IntPtr lParam)
     {
-        if (nCode >= 0 && wParam == (IntPtr)0x0201)
+        if (nCode >= 0)
         {
-            MSLLHOOKSTRUCT hookStruct = Marshal.PtrToStructure<MSLLHOOKSTRUCT>(lParam);
-            Point clickPoint = new Point(hookStruct.pt.x, hookStruct.pt.y);
-
-            if (Instance.closeButtonBounds.Contains(clickPoint))
+            // Ctrl + колесо мыши — масштабирование
+            if (wParam == (IntPtr)0x020A) // WM_MOUSEWHEEL
             {
-                Instance.BeginInvoke(new Action(() => Instance.ShowAdminExit()));
-                return (IntPtr)1;
+                bool isCtrlDown = (GetAsyncKeyState(0x11) & 0x8000) != 0;
+                if (isCtrlDown)
+                    return (IntPtr)1; // блокируем
             }
 
-            if (Instance.blockedZone.Contains(clickPoint))
-                return (IntPtr)1;
+            // Клик левой кнопкой
+            if (wParam == (IntPtr)0x0201) // WM_LBUTTONDOWN
+            {
+                MSLLHOOKSTRUCT hookStruct = Marshal.PtrToStructure<MSLLHOOKSTRUCT>(lParam);
+                Point clickPoint = new Point(hookStruct.pt.x, hookStruct.pt.y);
+
+                if (Instance.closeButtonBounds.Contains(clickPoint))
+                {
+                    Instance.BeginInvoke(new Action(() => Instance.ShowAdminExit()));
+                    return (IntPtr)1;
+                }
+
+                if (Instance.blockedZone.Contains(clickPoint))
+                    return (IntPtr)1;
+            }
         }
         return CallNextHookEx(_mouseHookID, nCode, wParam, lParam);
     }
