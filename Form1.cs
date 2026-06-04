@@ -13,8 +13,13 @@ public delegate IntPtr LowLevelMouseProc(int nCode, IntPtr wParam, IntPtr lParam
 public partial class Form1 : Form
 {
     public static Form1 Instance;
-    private const bool DebugBlockedZone = false;
     private static readonly Size CloseButtonSize = new Size(18, 18);
+    private const int WmKeyDown = 0x0100;
+    private const int WmSysKeyDown = 0x0104;
+    private const int WmLButtonDown = 0x0201;
+    private const int WmMouseWheel = 0x020A;
+    private const int VkAlt = 0x12;
+    private const int VkControl = 0x11;
 
     Process? chromeProcess;
     string adminPassword = "1234";
@@ -130,6 +135,11 @@ public partial class Form1 : Form
     {
         base.OnPaint(e);
 
+        using SolidBrush blockedZoneBrush = new SolidBrush(Color.FromArgb(110, Color.Red));
+        e.Graphics.FillRectangle(blockedZoneBrush, blockedZone);
+        using Pen blockedZonePen = new Pen(Color.Red, 2);
+        e.Graphics.DrawRectangle(blockedZonePen, blockedZone);
+
         TextRenderer.DrawText(
             e.Graphics,
             "×",
@@ -137,14 +147,6 @@ public partial class Form1 : Form
             closeButtonBounds,
             Color.Black,
             TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
-
-        if (DebugBlockedZone)
-        {
-            using SolidBrush debugBrush = new SolidBrush(Color.FromArgb(90, Color.Red));
-            e.Graphics.FillRectangle(debugBrush, blockedZone);
-            using Pen debugPen = new Pen(Color.Red, 2);
-            e.Graphics.DrawRectangle(debugPen, blockedZone);
-        }
     }
 
     private static IntPtr SetKeyboardHook(LowLevelKeyboardProc proc)
@@ -163,12 +165,27 @@ public partial class Form1 : Form
 
     private static IntPtr KeyboardCallback(int nCode, IntPtr wParam, IntPtr lParam)
     {
-        if (nCode >= 0)
+        if (nCode >= 0 && ((int)wParam == WmKeyDown || (int)wParam == WmSysKeyDown))
         {
             int vkCode = Marshal.ReadInt32(lParam);
             Keys key = (Keys)vkCode;
-            bool isAltDown = (GetAsyncKeyState(0x12) & 0x8000) != 0;
-            if (key == Keys.LWin || key == Keys.RWin || (isAltDown && key == Keys.Tab) || (isAltDown && key == Keys.F4))
+            bool isAltDown = (GetAsyncKeyState(VkAlt) & 0x8000) != 0;
+            bool isCtrlDown = (GetAsyncKeyState(VkControl) & 0x8000) != 0;
+            bool isBlockedZoomShortcut =
+                key == Keys.Add ||
+                key == Keys.Oemplus ||
+                key == Keys.OemMinus ||
+                key == Keys.Subtract ||
+                key == Keys.D0 ||
+                key == Keys.NumPad0;
+            bool isBlockedTabOrWindowShortcut = key == Keys.N || key == Keys.T;
+
+            if (key == Keys.LWin
+                || key == Keys.RWin
+                || (isAltDown && key == Keys.Tab)
+                || (isAltDown && key == Keys.F4)
+                || (isCtrlDown && isBlockedZoomShortcut)
+                || (isCtrlDown && isBlockedTabOrWindowShortcut))
                 return (IntPtr)1;
         }
         return CallNextHookEx(_kbdHookID, nCode, wParam, lParam);
@@ -176,7 +193,10 @@ public partial class Form1 : Form
 
     private static IntPtr MouseCallback(int nCode, IntPtr wParam, IntPtr lParam)
     {
-        if (nCode >= 0 && wParam == (IntPtr)0x0201)
+        if (nCode >= 0 && wParam == (IntPtr)WmMouseWheel && (GetAsyncKeyState(VkControl) & 0x8000) != 0)
+            return (IntPtr)1;
+
+        if (nCode >= 0 && wParam == (IntPtr)WmLButtonDown)
         {
             MSLLHOOKSTRUCT hookStruct = Marshal.PtrToStructure<MSLLHOOKSTRUCT>(lParam);
             Point clickPoint = new Point(hookStruct.pt.x, hookStruct.pt.y);
