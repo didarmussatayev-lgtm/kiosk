@@ -16,6 +16,22 @@ public partial class Form1 : Form
     private const bool DebugBlockedZone = true; // ← подсветка включена
     private static readonly Size CloseButtonSize = new Size(18, 18);
 
+    // ══════════════════════════════════════════════════
+    // КООРДИНАТЫ ЗАБЛОКИРОВАННОЙ ЗОНЫ
+    // Измените эти значения под нужное место на экране:
+    //   blockedZoneX      — отступ от левого края (пиксели)
+    //   blockedZoneY      — отступ от верхнего края (пиксели)
+    //   blockedZoneWidth  — ширина зоны
+    //   blockedZoneHeight — высота зоны
+    //
+    // Чтобы найти нужные координаты — просто наведите
+    // мышь на кнопку: координаты покажутся в углу экрана.
+    // ══════════════════════════════════════════════════
+    private const int blockedZoneX      = 900;
+    private const int blockedZoneY      = 55;
+    private const int blockedZoneWidth  = 280;
+    private const int blockedZoneHeight = 35;
+
     Process? chromeProcess;
     string adminPassword = "1234";
     private static IntPtr _kbdHookID = IntPtr.Zero;
@@ -23,6 +39,10 @@ public partial class Form1 : Form
     private readonly System.Windows.Forms.Timer watchdogTimer = new System.Windows.Forms.Timer();
     private readonly Rectangle closeButtonBounds = new Rectangle(new Point(0, 0), CloseButtonSize);
     private Rectangle blockedZone;
+
+    // Координаты мыши для отображения на экране
+    private Point _mousePos = Point.Empty;
+    private readonly Rectangle _coordLabelBounds = new Rectangle(30, 0, 200, 20);
 
     public Form1()
     {
@@ -119,17 +139,15 @@ public partial class Form1 : Form
 
     private void UpdateBlockedZone()
     {
-        int sw = Screen.PrimaryScreen.Bounds.Width;
-        int sh = Screen.PrimaryScreen.Bounds.Height;
-        int blockedX = (int)(sw * 0.75);
-        int blockedHeight = (int)(sh * 0.25);
-        blockedZone = new Rectangle(blockedX, 0, sw - blockedX, blockedHeight);
+        // Зона задаётся константами вверху файла — просто меняйте их
+        blockedZone = new Rectangle(blockedZoneX, blockedZoneY, blockedZoneWidth, blockedZoneHeight);
     }
 
     protected override void OnPaint(PaintEventArgs e)
     {
         base.OnPaint(e);
 
+        // Кнопка × (выход через пароль)
         TextRenderer.DrawText(
             e.Graphics,
             "×",
@@ -138,15 +156,13 @@ public partial class Form1 : Form
             Color.Black,
             TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
 
+        // Подсветка заблокированной зоны
         if (DebugBlockedZone)
         {
-            // Полупрозрачная красная заливка — видно что зона заблокирована
             using SolidBrush debugBrush = new SolidBrush(Color.FromArgb(90, Color.Red));
             e.Graphics.FillRectangle(debugBrush, blockedZone);
-            // Красная рамка
             using Pen debugPen = new Pen(Color.Red, 2);
             e.Graphics.DrawRectangle(debugPen, blockedZone);
-            // Текст "ЗАПРЕЩЕНО"
             TextRenderer.DrawText(
                 e.Graphics,
                 "ЗАПРЕЩЕНО",
@@ -154,6 +170,24 @@ public partial class Form1 : Form
                 blockedZone,
                 Color.DarkRed,
                 TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+        }
+
+        // ── Координаты мыши — показываем рядом с кнопкой × ──────
+        if (_mousePos != Point.Empty)
+        {
+            string coordText = $"X={_mousePos.X}  Y={_mousePos.Y}";
+
+            // Фон под текстом чтобы было читаемо
+            using SolidBrush bgBrush = new SolidBrush(Color.FromArgb(200, Color.Black));
+            e.Graphics.FillRectangle(bgBrush, _coordLabelBounds);
+
+            TextRenderer.DrawText(
+                e.Graphics,
+                coordText,
+                new Font("Courier New", 9, FontStyle.Bold),
+                _coordLabelBounds,
+                Color.Lime,
+                TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
         }
     }
 
@@ -177,30 +211,25 @@ public partial class Form1 : Form
         {
             int vkCode = Marshal.ReadInt32(lParam);
             Keys key = (Keys)vkCode;
-            bool isAltDown   = (GetAsyncKeyState(0x12) & 0x8000) != 0; // Alt
-            bool isCtrlDown  = (GetAsyncKeyState(0x11) & 0x8000) != 0; // Ctrl
-            bool isShiftDown = (GetAsyncKeyState(0x10) & 0x8000) != 0; // Shift
+            bool isAltDown   = (GetAsyncKeyState(0x12) & 0x8000) != 0;
+            bool isCtrlDown  = (GetAsyncKeyState(0x11) & 0x8000) != 0;
+            bool isShiftDown = (GetAsyncKeyState(0x10) & 0x8000) != 0;
 
-            // Win, Alt+Tab, Alt+F4
             if (key == Keys.LWin || key == Keys.RWin ||
                 (isAltDown && key == Keys.Tab) ||
                 (isAltDown && key == Keys.F4))
                 return (IntPtr)1;
 
-            // Ctrl+Plus / Ctrl+= / Ctrl+Minus — масштаб браузера
             if (isCtrlDown && (key == Keys.Add || key == Keys.Oemplus ||
                                key == Keys.Subtract || key == Keys.OemMinus))
                 return (IntPtr)1;
 
-            // Ctrl+N — новое окно
             if (isCtrlDown && !isShiftDown && key == Keys.N)
                 return (IntPtr)1;
 
-            // Ctrl+Shift+N — инкогнито
             if (isCtrlDown && isShiftDown && key == Keys.N)
                 return (IntPtr)1;
 
-            // Ctrl+T — новая вкладка
             if (isCtrlDown && key == Keys.T)
                 return (IntPtr)1;
         }
@@ -211,27 +240,37 @@ public partial class Form1 : Form
     {
         if (nCode >= 0)
         {
-            // Ctrl + колесо мыши — масштабирование
+            MSLLHOOKSTRUCT hookStruct = Marshal.PtrToStructure<MSLLHOOKSTRUCT>(lParam);
+            Point pt = new Point(hookStruct.pt.x, hookStruct.pt.y);
+
+            // ── Обновляем координаты мыши на экране при каждом движении ──
+            if (wParam == (IntPtr)0x0200) // WM_MOUSEMOVE
+            {
+                Instance.BeginInvoke(new Action(() =>
+                {
+                    Instance._mousePos = pt;
+                    Instance.Invalidate(Instance._coordLabelBounds);
+                }));
+            }
+
+            // Ctrl + колесо мыши — блокируем масштаб
             if (wParam == (IntPtr)0x020A) // WM_MOUSEWHEEL
             {
                 bool isCtrlDown = (GetAsyncKeyState(0x11) & 0x8000) != 0;
                 if (isCtrlDown)
-                    return (IntPtr)1; // блокируем
+                    return (IntPtr)1;
             }
 
             // Клик левой кнопкой
             if (wParam == (IntPtr)0x0201) // WM_LBUTTONDOWN
             {
-                MSLLHOOKSTRUCT hookStruct = Marshal.PtrToStructure<MSLLHOOKSTRUCT>(lParam);
-                Point clickPoint = new Point(hookStruct.pt.x, hookStruct.pt.y);
-
-                if (Instance.closeButtonBounds.Contains(clickPoint))
+                if (Instance.closeButtonBounds.Contains(pt))
                 {
                     Instance.BeginInvoke(new Action(() => Instance.ShowAdminExit()));
                     return (IntPtr)1;
                 }
 
-                if (Instance.blockedZone.Contains(clickPoint))
+                if (Instance.blockedZone.Contains(pt))
                     return (IntPtr)1;
             }
         }
