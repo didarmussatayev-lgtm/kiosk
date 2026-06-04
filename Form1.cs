@@ -14,12 +14,14 @@ public partial class Form1 : Form
 {
     public static Form1 Instance;
     private static readonly Size CloseButtonSize = new Size(18, 18);
+    private const int BlockedZoneOverlayOpacity = 110;
     private const int WmKeyDown = 0x0100;
     private const int WmSysKeyDown = 0x0104;
     private const int WmLButtonDown = 0x0201;
     private const int WmMouseWheel = 0x020A;
     private const int VkAlt = 0x12;
     private const int VkControl = 0x11;
+    private const int VkShift = 0x10;
 
     Process? chromeProcess;
     string adminPassword = "1234";
@@ -135,7 +137,7 @@ public partial class Form1 : Form
     {
         base.OnPaint(e);
 
-        using SolidBrush blockedZoneBrush = new SolidBrush(Color.FromArgb(110, Color.Red));
+        using SolidBrush blockedZoneBrush = new SolidBrush(Color.FromArgb(BlockedZoneOverlayOpacity, Color.Red));
         e.Graphics.FillRectangle(blockedZoneBrush, blockedZone);
         using Pen blockedZonePen = new Pen(Color.Red, 2);
         e.Graphics.DrawRectangle(blockedZonePen, blockedZone);
@@ -171,20 +173,26 @@ public partial class Form1 : Form
             Keys key = (Keys)vkCode;
             bool isAltDown = (GetAsyncKeyState(VkAlt) & 0x8000) != 0;
             bool isCtrlDown = (GetAsyncKeyState(VkControl) & 0x8000) != 0;
-            bool isBlockedZoomShortcut =
+            bool isShiftDown = (GetAsyncKeyState(VkShift) & 0x8000) != 0;
+            bool isBlockedZoomShortcut = isCtrlDown && (
                 key == Keys.Add ||
                 key == Keys.Oemplus ||
                 key == Keys.OemMinus ||
                 key == Keys.Subtract ||
                 key == Keys.D0 ||
-                key == Keys.NumPad0;
-            bool isBlockedTabOrWindowShortcut = key == Keys.N || key == Keys.T;
+                key == Keys.NumPad0);
+            bool isBlockedNewWindowShortcut = isCtrlDown && key == Keys.N;
+            bool isBlockedIncognitoWindowShortcut = isCtrlDown && isShiftDown && key == Keys.N;
+            bool isBlockedNewTabShortcut = isCtrlDown && key == Keys.T;
 
             if (key == Keys.LWin
                 || key == Keys.RWin
                 || (isAltDown && key == Keys.Tab)
                 || (isAltDown && key == Keys.F4)
-                || (isCtrlDown && (isBlockedZoomShortcut || isBlockedTabOrWindowShortcut)))
+                || isBlockedZoomShortcut
+                || isBlockedNewWindowShortcut
+                || isBlockedIncognitoWindowShortcut
+                || isBlockedNewTabShortcut)
                 return (IntPtr)1;
         }
         return CallNextHookEx(_kbdHookID, nCode, wParam, lParam);
