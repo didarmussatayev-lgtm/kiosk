@@ -20,6 +20,7 @@ public partial class Form1 : Form
     private const int WmMouseWheel = 0x020A;
     private const int VkAlt = 0x12;
     private const int VkControl = 0x11;
+    private const int VkShift = 0x10;
 
     Process? chromeProcess;
     string adminPassword = "1234";
@@ -171,6 +172,7 @@ public partial class Form1 : Form
             Keys key = (Keys)vkCode;
             bool isAltDown = (GetAsyncKeyState(VkAlt) & 0x8000) != 0;
             bool isCtrlDown = (GetAsyncKeyState(VkControl) & 0x8000) != 0;
+            bool isShiftDown = (GetAsyncKeyState(VkShift) & 0x8000) != 0;
             bool isBlockedZoomShortcut =
                 key == Keys.Add ||
                 key == Keys.Oemplus ||
@@ -178,14 +180,14 @@ public partial class Form1 : Form
                 key == Keys.Subtract ||
                 key == Keys.D0 ||
                 key == Keys.NumPad0;
-            bool isBlockedTabOrWindowShortcut = key == Keys.N || key == Keys.T;
+            bool isCtrlShiftNShortcut = key == Keys.N && isShiftDown;
+            bool isBlockedTabOrWindowShortcut = key == Keys.N || key == Keys.T || isCtrlShiftNShortcut;
 
             if (key == Keys.LWin
                 || key == Keys.RWin
                 || (isAltDown && key == Keys.Tab)
                 || (isAltDown && key == Keys.F4)
-                || (isCtrlDown && isBlockedZoomShortcut)
-                || (isCtrlDown && isBlockedTabOrWindowShortcut))
+                || (isCtrlDown && (isBlockedZoomShortcut || isBlockedTabOrWindowShortcut)))
                 return (IntPtr)1;
         }
         return CallNextHookEx(_kbdHookID, nCode, wParam, lParam);
