@@ -18,27 +18,31 @@ public partial class Form1 : Form
     private static IntPtr _kbdHookID = IntPtr.Zero;
     private static IntPtr _mouseHookID = IntPtr.Zero;
     private System.Windows.Forms.Timer watchdogTimer = new System.Windows.Forms.Timer();
+    private const bool DebugBlockedZone = true;
+    private readonly Rectangle closeButtonBounds = new Rectangle(0, 0, 24, 24);
+    private Rectangle blockedZone;
 
     public Form1()
     {
         Instance = this;
         this.FormBorderStyle = FormBorderStyle.None;
-        
-        // Убираем красный фон и делаем форму невидимой "рамкой" для кнопки X
-        this.BackColor = Color.Magenta;
-        this.TransparencyKey = Color.Magenta;
-        this.Size = new Size(50, 50);
+        this.BackColor = Color.Lime;
+        this.TransparencyKey = Color.Lime;
+        this.Size = Screen.PrimaryScreen.Bounds.Size;
         this.Location = new Point(0, 0);
         this.TopMost = true;
         this.ShowInTaskbar = false;
+        this.StartPosition = FormStartPosition.Manual;
+        this.DoubleBuffered = true;
+        this.Enabled = false;
 
-        Label lbl = new Label() { Text = "X", ForeColor = Color.Red, Font = new Font("Arial", 16, FontStyle.Bold), Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleCenter };
-        this.Controls.Add(lbl);
-        lbl.Click += (s, e) => ShowAdminExit();
+        UpdateBlockedZone();
 
         watchdogTimer.Interval = 1000;
         watchdogTimer.Tick += (s, e) => {
             HideTaskbar();
+            UpdateBlockedZone();
+            Invalidate();
             if (chromeProcess != null && !chromeProcess.HasExited)
                 SetWindowPos(chromeProcess.MainWindowHandle, 0, 0, 0, Screen.PrimaryScreen.Bounds.Width, Screen.PrimaryScreen.Bounds.Height, 0x0040);
         };
@@ -98,6 +102,27 @@ public partial class Form1 : Form
         }
     }
 
+    private void UpdateBlockedZone()
+    {
+        int sw = Screen.PrimaryScreen.Bounds.Width;
+        int sh = Screen.PrimaryScreen.Bounds.Height;
+        blockedZone = new Rectangle((int)(sw * 0.75), 0, sw - (int)(sw * 0.75), (int)(sh * 0.25));
+    }
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        base.OnPaint(e);
+
+        using Font closeFont = new Font("Arial", 12, FontStyle.Bold);
+        TextRenderer.DrawText(e.Graphics, "X", closeFont, closeButtonBounds, Color.Black, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+
+        if (DebugBlockedZone)
+        {
+            using SolidBrush debugBrush = new SolidBrush(Color.FromArgb(90, Color.Red));
+            e.Graphics.FillRectangle(debugBrush, blockedZone);
+        }
+    }
+
     private static IntPtr SetKeyboardHook(LowLevelKeyboardProc proc)
     {
         using (Process curProcess = Process.GetCurrentProcess())
@@ -127,21 +152,18 @@ public partial class Form1 : Form
 
     private static IntPtr MouseCallback(int nCode, IntPtr wParam, IntPtr lParam)
     {
-        if (nCode >= 0 && (wParam == (IntPtr)0x0201)) // ЛКМ
+        if (nCode >= 0 && wParam == (IntPtr)0x0201)
         {
             MSLLHOOKSTRUCT hookStruct = Marshal.PtrToStructure<MSLLHOOKSTRUCT>(lParam);
-            int sw = Screen.PrimaryScreen.Bounds.Width;
-            int sh = Screen.PrimaryScreen.Bounds.Height;
+            Point clickPoint = new Point(hookStruct.pt.x, hookStruct.pt.y);
 
-            // Кнопка X
-            if (hookStruct.pt.x < 50 && hookStruct.pt.y < 50)
+            if (Instance.closeButtonBounds.Contains(clickPoint))
             {
                 Instance.BeginInvoke(new Action(() => Instance.ShowAdminExit()));
                 return (IntPtr)1;
             }
 
-            // Блокировка профиля (зона 25% справа, 25% сверху)
-            if (hookStruct.pt.x > (sw * 0.75) && hookStruct.pt.y < (sh * 0.25))
+            if (Instance.blockedZone.Contains(clickPoint))
                 return (IntPtr)1;
         }
         return CallNextHookEx(_mouseHookID, nCode, wParam, lParam);
