@@ -13,33 +13,36 @@ public delegate IntPtr LowLevelMouseProc(int nCode, IntPtr wParam, IntPtr lParam
 public partial class Form1 : Form
 {
     public static Form1 Instance;
+    private const bool DebugBlockedZone = false;
+    private static readonly Size CloseButtonSize = new Size(18, 18);
+
     Process? chromeProcess;
     string adminPassword = "1234";
     private static IntPtr _kbdHookID = IntPtr.Zero;
     private static IntPtr _mouseHookID = IntPtr.Zero;
-    private System.Windows.Forms.Timer watchdogTimer = new System.Windows.Forms.Timer();
-    private const bool DebugBlockedZone = true;
-    private readonly Rectangle closeButtonBounds = new Rectangle(0, 0, 24, 24);
+    private readonly System.Windows.Forms.Timer watchdogTimer = new System.Windows.Forms.Timer();
+    private readonly Rectangle closeButtonBounds = new Rectangle(new Point(0, 0), CloseButtonSize);
     private Rectangle blockedZone;
 
     public Form1()
     {
         Instance = this;
-        this.FormBorderStyle = FormBorderStyle.None;
-        this.BackColor = Color.Lime;
-        this.TransparencyKey = Color.Lime;
-        this.Size = Screen.PrimaryScreen.Bounds.Size;
-        this.Location = new Point(0, 0);
-        this.TopMost = true;
-        this.ShowInTaskbar = false;
-        this.StartPosition = FormStartPosition.Manual;
-        this.DoubleBuffered = true;
-        this.Enabled = false;
+        FormBorderStyle = FormBorderStyle.None;
+        BackColor = Color.Lime;
+        TransparencyKey = Color.Lime;
+        Size = Screen.PrimaryScreen.Bounds.Size;
+        Location = new Point(0, 0);
+        TopMost = true;
+        ShowInTaskbar = false;
+        StartPosition = FormStartPosition.Manual;
+        DoubleBuffered = true;
+        Enabled = false;
 
         UpdateBlockedZone();
 
         watchdogTimer.Interval = 1000;
-        watchdogTimer.Tick += (s, e) => {
+        watchdogTimer.Tick += (s, e) =>
+        {
             HideTaskbar();
             UpdateBlockedZone();
             Invalidate();
@@ -56,21 +59,27 @@ public partial class Form1 : Form
 
     void StartChrome()
     {
-        try {
+        try
+        {
             string localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
             string userDataDir = Path.Combine(localAppData, @"Google\Chrome\User Data");
             string profileName = Directory.Exists(Path.Combine(userDataDir, "Profile 5")) ? "Profile 5" : "Default";
             string chromePath = @"C:\Program Files\Google\Chrome\Application\chrome.exe";
             if (!File.Exists(chromePath)) chromePath = @"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe";
 
-            foreach (var p in Process.GetProcessesByName("chrome")) { try { p.Kill(); } catch { } }
-            
-            chromeProcess = Process.Start(new ProcessStartInfo {
+            foreach (var p in Process.GetProcessesByName("chrome"))
+            {
+                try { p.Kill(); } catch { }
+            }
+
+            chromeProcess = Process.Start(new ProcessStartInfo
+            {
                 FileName = chromePath,
                 Arguments = $"--kiosk --restore-last-session --disable-infobars --force-device-scale-factor=1 --user-data-dir=\"{userDataDir}\" --profile-directory=\"{profileName}\" https://kaspi.kz/mc/#/orders-new?status=NEW",
                 UseShellExecute = true
             });
-        } catch { }
+        }
+        catch { }
     }
 
     public void ShowAdminExit()
@@ -78,25 +87,31 @@ public partial class Form1 : Form
         watchdogTimer.Stop();
         using (Form prompt = new Form())
         {
-            prompt.Width = 300; prompt.Height = 150;
+            prompt.Width = 300;
+            prompt.Height = 150;
             prompt.Text = "Администрирование";
             prompt.StartPosition = FormStartPosition.CenterScreen;
             prompt.TopMost = true;
             prompt.FormBorderStyle = FormBorderStyle.FixedDialog;
             prompt.ControlBox = false;
+
             TextBox txt = new TextBox() { Left = 20, Top = 40, Width = 240, PasswordChar = '*' };
             Button btn = new Button() { Text = "ОК", Left = 160, Top = 80, DialogResult = DialogResult.OK };
-            prompt.Controls.Add(txt); prompt.Controls.Add(btn);
+            prompt.Controls.Add(txt);
+            prompt.Controls.Add(btn);
             prompt.AcceptButton = btn;
             prompt.Shown += (s, e) => { txt.Focus(); };
 
-            if (prompt.ShowDialog() == DialogResult.OK && txt.Text == adminPassword) {
+            if (prompt.ShowDialog() == DialogResult.OK && txt.Text == adminPassword)
+            {
                 UnhookWindowsHookEx(_kbdHookID);
                 UnhookWindowsHookEx(_mouseHookID);
                 RestoreTaskbar();
                 try { chromeProcess?.Kill(); } catch { }
                 Application.Exit();
-            } else {
+            }
+            else
+            {
                 watchdogTimer.Start();
             }
         }
@@ -106,20 +121,29 @@ public partial class Form1 : Form
     {
         int sw = Screen.PrimaryScreen.Bounds.Width;
         int sh = Screen.PrimaryScreen.Bounds.Height;
-        blockedZone = new Rectangle((int)(sw * 0.75), 0, sw - (int)(sw * 0.75), (int)(sh * 0.25));
+        int blockedX = (int)(sw * 0.75);
+        int blockedHeight = (int)(sh * 0.25);
+        blockedZone = new Rectangle(blockedX, 0, sw - blockedX, blockedHeight);
     }
 
     protected override void OnPaint(PaintEventArgs e)
     {
         base.OnPaint(e);
 
-        using Font closeFont = new Font("Arial", 12, FontStyle.Bold);
-        TextRenderer.DrawText(e.Graphics, "X", closeFont, closeButtonBounds, Color.Black, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+        TextRenderer.DrawText(
+            e.Graphics,
+            "×",
+            new Font("Segoe UI", 9, FontStyle.Bold),
+            closeButtonBounds,
+            Color.Black,
+            TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
 
         if (DebugBlockedZone)
         {
             using SolidBrush debugBrush = new SolidBrush(Color.FromArgb(90, Color.Red));
             e.Graphics.FillRectangle(debugBrush, blockedZone);
+            using Pen debugPen = new Pen(Color.Red, 2);
+            e.Graphics.DrawRectangle(debugPen, blockedZone);
         }
     }
 
@@ -180,7 +204,7 @@ public partial class Form1 : Form
     [DllImport("kernel32.dll")] static extern IntPtr GetModuleHandle(string lpModuleName);
     [DllImport("user32.dll")] static extern IntPtr FindWindow(string lpClassName, string lpWindowName);
     [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
-    
+
     void HideTaskbar() { ShowWindow(FindWindow("Shell_TrayWnd", ""), 0); }
     void RestoreTaskbar() { ShowWindow(FindWindow("Shell_TrayWnd", ""), 5); }
     protected override void OnFormClosing(FormClosingEventArgs e) { UnhookWindowsHookEx(_kbdHookID); UnhookWindowsHookEx(_mouseHookID); base.OnFormClosing(e); }
